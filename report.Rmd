@@ -1,0 +1,173 @@
+---
+title: "MA678 project"
+author: "ZhangBiyao"
+date: "2021/12/8"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning=F,message = F,echo=F,highlight=F)
+knitr::opts_chunk$set(fig.width=6, fig.height=4,fig.align = "center") 
+pacman::p_load("knitr","arm","ggplot2","tidyr","dplyr")
+library(lme4)
+library(arm)
+library(lmerTest)
+library(lattice)
+library(gridExtra)
+```
+
+
+## Abstract
+
+Multilevel models are a generalized form of traditional linear regression models and have the ability to directly model the time-series/cross-sectional nature of financial security returns. Baesd on the method that multilevel models generalize well-known asset pricing regression techniques like Fama-Macbeth and FamaFrench regressions, I fit the model to predict return of stock/
+
+
+
+## Introduction to WLTW 
+
+| column names      | explanation |
+| :--:              | :----- |
+| Ticker symbol             | WLTW|
+| Securities          | Willis Towers Watson |
+| SEC filings          | reprots|
+| GICS Sector      | Financials |
+| GICS Sub Industry          | Insurance Brokers |
+| Address of Headquaters       | London, United Kingdom|
+| Date first added          | 2016/1/5|
+| CIK          | 1140536|
+
+### Data description
+
+Datasets are from Kaggle, here is the link:https://www.kaggle.com/dgawlik/nyse
+Dataset consists of following files:
+1)prices.csv: raw, as-is daily prices. Most of data spans from 2010 to the end 2016, for companies new on stock market date range is shorter. There have been approx. 140 stock splits in that time, this set doesn't account for that.
+2)prices-split-adjusted.csv: same as prices, but there have been added adjustments for splits.
+3)securities.csv: general description of each company with division on sectors
+4)fundamentals.csv: metrics extracted from annual SEC 10K fillings (2012-2016), should be enough to derive most of popular fundamental indicators.
+
+### Symbol description
+
+A ticker symbol or stock symbol is a unnique series of letters assigned to a security for trading purpose. Stock listed on the New York Stock Exchange can have four or fewer letters. Symbols are just a shorthand way of describing a company's stock.
+
+
+```{r cars}
+prices <- data.frame(read.csv("prices.csv"))
+WLTW_prices<-filter(prices,symbol=="WLTW")
+head(WLTW_prices)
+```
+
+```{r}
+fundamentals <- data.frame(read.csv("fundamentals.csv"))
+WLTW_fd<-filter(fundamentals,Ticker.Symbol == "WLTW")
+#head(WLTW_fd)
+```
+
+
+
+## Visulization
+
+```{r}
+p1<-ggplot(WLTW_prices,aes(x=date))+geom_line(aes(y=open,group=1),color="skyblue")+geom_line(aes(y = close,group=1), color="darkorchid", linetype="twodash")+labs(title="Open Price VS Close Price")
+p2<-ggplot(WLTW_prices,aes(x=date))+geom_line(aes(y=low,group=1),color="skyblue")+geom_line(aes(y = high,group=1), color="darkorchid", linetype="twodash")+labs(title="Low Price VS High Price")
+p3<-ggplot(WLTW_prices,aes(x=date))+geom_line(aes(y=volume,group=1),color="skyblue")+labs(title="Stock Volume")
+grid.arrange(p1,p2,p3,nrow=3)
+```
+
+The first plot shows the change Open Pice and Close Price during 2016, the second plot shows the difference between Low Price and High Price, the third plot showsthe volume of WLTW stock. According to the above plots, the trend of High Price is similar to the trend of moment price which is midway between High Price and Low Price. Based on the analysis and actual situation of the stock market, I use High Price to calculate Market Capitalization Weighted Index. (The explanation is in Appendix.) 
+
+
+## Method: Multilevel Model
+
+For simplicity, let us start with estimating an asset's CAPM $\beta$ via linear regression. Exposure to the market factor, $\beta$, is measured as the slope of a regression with the security's return $R_{i}$ as the explained variable and the return of the market-cap weighted index $X_{m k t}$ as the explanatory variable. The $\alpha$ component, or the intercept of this regression, is meant to represent the return of a security in excess of what can be explained through exposure to the market. The model is given by
+$$
+R_{i}=\alpha_{i}+\beta_{i} X_{m k t}+\epsilon_{i}
+$$
+
+Each security $i$ is given it's own $\beta_{i}$ and $\alpha_{i}$ for securities $1, \ldots, n$.
+
+Multilevel models generalize these cases, and directly condition the slope and intercept on both global (pooled) information and group-level information. If information is strong enough for either approach, the model will converge to global or group-level models. We can think of these as a set of related models, where $R_{i}$ is related not only to stock-specific information $\left(\beta_{i}\right.$ and $\left.\alpha_{i}\right)$ but also to global parameters $\left(\beta_{0}\right.$ and $\left.\alpha_{0}\right)$. This model is given by
+$$
+R_{i}=\alpha_{0}+\alpha_{i}+\beta_{0} X_{m k t}+\beta_{i} X_{m k t}+\epsilon_{i}+\epsilon_{0}
+$$
+The no pooling models are given by
+$$
+R_{i}=\alpha_{i}+\beta_{i, 1} X_{m k t}+\epsilon_{i}
+$$
+
+
+```{r}
+# number of shares outstanding = volume * 100 
+WLTW_prices<-mutate(WLTW_prices,outstanding=WLTW_prices$volume*100)
+#choose high prices
+WLTW_prices<-mutate(WLTW_prices,mkt.cap=WLTW_prices$high*WLTW_prices$outstanding)
+#CWI composite=the mkt.cap of WLTW / the weight of WLTW
+WLTW_prices<-mutate(WLTW_prices,CWI.composite=29.13/0.00073566)
+WLTW_prices<-mutate(WLTW_prices,weight=mkt.cap/(CWI.composite*1000000000))
+WLTW_prices<-mutate(WLTW_prices,Gross.profit=3.480)
+```
+$$
+\begin{array}{llcr} 
+\text {}& \text { outstanding } & \text { mkt.cap } & \text { CWI.composite } & \text {mkt-cap weighted} \\
+\hline 1 & 216360000 & 27315450000 & 39597.1 & 0.0007565925 \\
+2 & 238640000 & 29958865839 & 39597.1 & 0.0007528146 \\
+3 & 248950000 & 29809272502 & 39597.1 & 0.0005950433 \\
+4 & 200630000 & 23561987601 & 39597.1 & 0.0004173817 \\
+5 & 140860000 & 16527104082 & 39597.1 & 0.0003218263
+\end{array}
+$$
+The above table shows part of the data. Outstanding represents the number of stocks that is outstanding in market, mkt.cap represents market capitalization, CWI composite is total capitalization, and mkt-cap weighted represents market capitalization weighted index.
+
+### fitting model
+
+```{r}
+fit<-lmer(Gross.profit~weight+(1|date),data=WLTW_prices,control=lmerControl(check.nobs.vs.nlev = "ignore",check.nobs.vs.rankZ = "ignore",check.nobs.vs.nRE="ignore"))
+#head(coef(fit))
+#summary(fit)
+```
+|                |Estimate   |Std. Error  |t value   |
+|:---:           |:---:      |:---:       |:---:     |           
+|(Intercept)     |3.480e+00     |2.599e-16        |1.339e+16     | 
+|mkt cap weighted index    |5.502e-12       |9.235e-13        |5.957e+00     |   
+         
+
+
+## Result:Model validation
+
+```{r echo=FALSE, fig.height=2.5, fig.width=6, fig.cap="Residual plot and Q-Q plot."}
+binnedplot(fitted(fit),resid(fit))
+re <- plot(fit)
+qq <- qqmath(fit)
+grid.arrange(re,qq,nrow=1)
+
+```
+
+According to the residual plots, the model needs a lot of improvement. According to the qq plot, many dots are not one the line, the nnormality is not good.
+
+## Discussion
+
+As the stock market is complex and volatile, we should consider more influencing factors.
+
+## Reference
+https://corporatefinanceinstitute.com/resources/knowledge/trading-investing/capitalization-weighted-index/
+
+https://papers.ssrn.com/sol3/papers.cfm?abstract_id=3411358
+
+https://www.slickcharts.com/sp500
+
+\newpage
+## Appendix
+
+The market-cap weighted index $X_{m k t}$ (CWI) is a type of stock market index in which each component of the index is weighted relative to its total market capitalization.
+$$
+ Market\ Capitalization = Stock Price  \times  No. of\   Shares\ Outstanding 
+$$
+
+The total market capitalization of the index is the sum of the market capitalization of all the components. Therefore, the market capitalization of the CWI composite is:
+$$
+ CWI\   Compostie = Market\ Capitalization_{1}+Market\ Capitalization_{2}+ ···+Market\ Capitalization_{n}
+$$
+
+The weight og each index component is determined using the formula below:
+$$
+ Weight_{i}=\frac{ Market\ Capitalization_{i} }{ CWI\  Composite } \times 100 \%
+$$
